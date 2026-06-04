@@ -130,3 +130,29 @@ def get_secure_dashboard(current_user: dict = Depends(get_current_user)):
         "your_role": current_user["role"],
         "secret_data": secret_data
     }
+@app.get("/api/teachers")
+def get_teachers(current_user: dict = Depends(get_current_user)):
+    """
+    Fetch a list of all active teachers. 
+    Protected route: Requires a valid login token.
+    """
+    try:
+        # Ask Supabase for all rows where is_active is True
+        response = supabase.table("teachers").select("*").eq("is_active", True).execute()
+        return response.data
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/students")
+def get_students(current_user: dict = Depends(get_current_user)):
+    """
+    Fetch a list of all students.
+    Protected route: Requires a valid login token.
+    """
+    try:
+        # Ask Supabase for all student rows
+        response = supabase.table("students").select("*").execute()
+        return response.data
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
