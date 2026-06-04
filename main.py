@@ -117,6 +117,11 @@ class StudentCreate(BaseModel):
     full_name: str
     grade_level: str
     fee_status: str = "Pending"  # If they don't provide a status, it defaults to Pending
+# Define what data is required to create a new teacher
+class TeacherCreate(BaseModel):
+    full_name: str
+    subject: str
+    is_active: bool = True  # Defaults to True for new hires
 # 2. A protected route! Notice the `Depends(get_current_user)` part.
 @app.get("/api/dashboard")
 def get_secure_dashboard(current_user: dict = Depends(get_current_user)):
@@ -182,6 +187,28 @@ def create_student(student: StudentCreate, current_user: dict = Depends(get_curr
         return {
             "message": "Student successfully added!",
             "new_student": response.data[0]
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+    
+@app.post("/api/teachers")
+def create_teacher(teacher: TeacherCreate, current_user: dict = Depends(get_current_user)):
+    """
+    Add a brand-new teacher to the database.
+    Protected route: Requires a valid login token.
+    """
+    try:
+        new_teacher_data = {
+            "full_name": teacher.full_name,
+            "subject": teacher.subject,
+            "is_active": teacher.is_active
+        }
+        
+        response = supabase.table("teachers").insert(new_teacher_data).execute()
+        
+        return {
+            "message": "Teacher successfully added!",
+            "new_teacher": response.data[0]
         }
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
