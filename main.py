@@ -6,6 +6,8 @@ from supabase import create_client, Client
 from dotenv import load_dotenv
 import jwt
 from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
+from datetime import date
+from typing import Optional
 
 # Import the security helpers we built earlier
 from security import verify_password, create_access_token
@@ -116,7 +118,16 @@ def get_current_user(token: str = Depends(oauth2_scheme)):
 class StudentCreate(BaseModel):
     full_name: str
     grade_level: str
-    fee_status: str = "Pending"  # If they don't provide a status, it defaults to Pending
+    fee_status: str = "Pending"
+    contact_number: Optional[str] = None
+    mother_name: Optional[str] = None
+    father_name: Optional[str] = None
+    dob: Optional[date] = None
+    address: Optional[str] = None
+    custom_notes: Optional[str] = None
+    total_fee: float = 0.00
+    paid_amount: float = 0.00
+    advance_balance: float = 0.00  # If they don't provide a status, it defaults to Pending
 # Define what data is required to create a new teacher
 class TeacherCreate(BaseModel):
     full_name: str
@@ -169,27 +180,31 @@ def get_students(current_user: dict = Depends(get_current_user)):
 @app.post("/api/students")
 def create_student(student: StudentCreate, current_user: dict = Depends(get_current_user)):
     """
-    Add a brand-new student to the database.
-    Protected route: Requires a valid login token.
+    Add a brand-new student to the database with full profile and fee data.
+    Protected route: Requires a valid login token AND Admin role.
     """
     try:
+        # 1. Security Check
         if current_user.get("role") != "admin":
             raise HTTPException(status_code=403, detail="Access Denied: Admin privileges required.")
-        # Convert our Pydantic model into a standard Python dictionary
-        new_student_data = {
-            "full_name": student.full_name,
-            "grade_level": student.grade_level,
-            "fee_status": student.fee_status
-        }
         
-        # Insert the data into the Supabase 'students' table
+        # 2. Convert the incoming data to a dictionary
+        # exclude_none=True ensures we don't send empty 'null' values to the database if not provided
+        new_student_data = student.dict(exclude_none=True)
+        
+        # Convert the date object to a string format the database understands, if a dob was provided
+        if "dob" in new_student_data:
+            new_student_data["dob"] = new_student_data["dob"].isoformat()
+        
+        # 3. Insert into Supabase
         response = supabase.table("students").insert(new_student_data).execute()
         
-        # Return a success message and the newly created database row
         return {
-            "message": "Student successfully added!",
+            "message": "Student successfully registered!",
             "new_student": response.data[0]
         }
+    except HTTPException as http_ex:
+        raise http_ex
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
     
