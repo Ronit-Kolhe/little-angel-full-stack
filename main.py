@@ -173,6 +173,8 @@ def create_student(student: StudentCreate, current_user: dict = Depends(get_curr
     Protected route: Requires a valid login token.
     """
     try:
+        if current_user.get("role") != "admin":
+            raise HTTPException(status_code=403, detail="Access Denied: Admin privileges required.")
         # Convert our Pydantic model into a standard Python dictionary
         new_student_data = {
             "full_name": student.full_name,
@@ -198,6 +200,8 @@ def create_teacher(teacher: TeacherCreate, current_user: dict = Depends(get_curr
     Protected route: Requires a valid login token.
     """
     try:
+        if current_user.get("role") != "admin":
+            raise HTTPException(status_code=403, detail="Access Denied: Admin privileges required.")
         new_teacher_data = {
             "full_name": teacher.full_name,
             "subject": teacher.subject,
