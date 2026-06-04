@@ -112,7 +112,11 @@ def get_current_user(token: str = Depends(oauth2_scheme)):
     except jwt.InvalidTokenError:
         raise HTTPException(status_code=401, detail="Invalid token.")
 
-
+# Define what data is required to create a new student
+class StudentCreate(BaseModel):
+    full_name: str
+    grade_level: str
+    fee_status: str = "Pending"  # If they don't provide a status, it defaults to Pending
 # 2. A protected route! Notice the `Depends(get_current_user)` part.
 @app.get("/api/dashboard")
 def get_secure_dashboard(current_user: dict = Depends(get_current_user)):
@@ -154,5 +158,30 @@ def get_students(current_user: dict = Depends(get_current_user)):
         # Ask Supabase for all student rows
         response = supabase.table("students").select("*").execute()
         return response.data
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+    
+@app.post("/api/students")
+def create_student(student: StudentCreate, current_user: dict = Depends(get_current_user)):
+    """
+    Add a brand-new student to the database.
+    Protected route: Requires a valid login token.
+    """
+    try:
+        # Convert our Pydantic model into a standard Python dictionary
+        new_student_data = {
+            "full_name": student.full_name,
+            "grade_level": student.grade_level,
+            "fee_status": student.fee_status
+        }
+        
+        # Insert the data into the Supabase 'students' table
+        response = supabase.table("students").insert(new_student_data).execute()
+        
+        # Return a success message and the newly created database row
+        return {
+            "message": "Student successfully added!",
+            "new_student": response.data[0]
+        }
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
