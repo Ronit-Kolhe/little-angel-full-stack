@@ -451,3 +451,48 @@ def get_dashboard_analytics(current_user: dict = Depends(get_current_user)):
 
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))    
+    
+@app.get("/api/students/{student_id}/report")
+def get_student_report(student_id: int, current_user: dict = Depends(get_current_user)):
+    """
+    Fetch a complete 360-degree profile for a single student, including their payment history.
+    Protected route: Requires Admin privileges.
+    """
+    try:
+        # 1. Security Check
+        if current_user.get("role") != "admin":
+            raise HTTPException(status_code=403, detail="Access Denied.")
+            
+        # 2. Fetch the Master Profile
+        student_res = supabase.table("students").select("*").eq("id", student_id).execute()
+        
+        if not student_res.data:
+            raise HTTPException(status_code=404, detail="Student not found.")
+            
+        student_profile = student_res.data[0]
+        
+        # 3. Fetch the Complete Payment Ledger for this specific student
+        payments_res = supabase.table("payments").select("*").eq("student_id", student_id).order("payment_date", desc=True).execute()
+        
+        # 4. Calculate real-time remaining dues
+        total = float(student_profile.get("total_fee", 0))
+        paid = float(student_profile.get("paid_amount", 0))
+        remaining = max(0.0, total - paid)
+        
+        # 5. Package it all together
+        return {
+            "profile": student_profile,
+            "financial_summary": {
+                "total_fee": total,
+                "paid_amount": paid,
+                "advance_balance": student_profile.get("advance_balance", 0),
+                "remaining_dues": remaining,
+                "status": student_profile.get("fee_status")
+            },
+            "payment_history": payments_res.data
+        }
+        
+    except HTTPException as http_ex:
+        raise http_ex
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
