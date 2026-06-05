@@ -9,6 +9,11 @@ from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
 from datetime import date
 from typing import Optional
 import datetime
+import io
+from fastapi.responses import StreamingResponse
+from reportlab.pdfgen import canvas
+from reportlab.lib.pagesizes import A4
+
 # Import the security helpers we built earlier
 from security import verify_password, create_access_token
 
@@ -292,6 +297,101 @@ def create_payment(payment: PaymentCreate, current_user: dict = Depends(get_curr
             "new_student_status": new_fee_status,
             "transaction_details": new_payment.data[0]
         }
+
+    except HTTPException as http_ex:
+        raise http_ex
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+    
+@app.get("/api/receipts/{receipt_id}")
+def generate_receipt_pdf(receipt_id: str, current_user: dict = Depends(get_current_user)):
+    """
+    Generate an A4 PDF receipt on the fly and stream it to the browser.
+    Protected route: Requires Admin privileges.
+    """
+    try:
+        # 1. Security Check
+        if current_user.get("role") != "admin":
+            raise HTTPException(status_code=403, detail="Access Denied.")
+
+        # 2. Fetch Payment Data
+        payment_res = supabase.table("payments").select("*").eq("receipt_id", receipt_id).execute()
+        if not payment_res.data:
+            raise HTTPException(status_code=404, detail="Receipt not found.")
+        payment_data = payment_res.data[0]
+
+        # 3. Fetch Associated Student Data
+        student_res = supabase.table("students").select("*").eq("id", payment_data["student_id"]).execute()
+        student_data = student_res.data[0]
+
+        # 4. Create an in-memory buffer to hold the PDF
+        buffer = io.BytesIO()
+        
+        # 5. Draw the PDF using ReportLab
+        c = canvas.Canvas(buffer, pagesize=A4)
+        width, height = A4
+
+        # --- DRAW HEADER ---
+        c.setFont("Helvetica-Bold", 20)
+        c.drawCentredString(width / 2.0, height - 50, "Mangalam Engineering School")
+        c.setFont("Helvetica", 12)
+        c.drawCentredString(width / 2.0, height - 70, "Official Fee Receipt")
+        c.line(50, height - 85, width - 50, height - 85)
+
+        # --- DRAW RECEIPT DETAILS ---
+        c.setFont("Helvetica-Bold", 12)
+        c.drawString(50, height - 120, f"Receipt ID: {payment_data['receipt_id']}")
+        # Format the timestamp nicely
+        date_str = payment_data['payment_date'].split('T')[0]
+        c.drawString(width - 200, height - 120, f"Date: {date_str}")
+
+        # --- DRAW STUDENT DETAILS ---
+        c.setFont("Helvetica", 12)
+        c.drawString(50, height - 160, f"Student Name: {student_data['full_name']}")
+        c.drawString(50, height - 180, f"Class: {student_data['grade_level']}")
+        if student_data.get('contact_number'):
+            c.drawString(50, height - 200, f"Contact: {student_data['contact_number']}")
+
+        # --- DRAW PAYMENT DETAILS ---
+        c.setFont("Helvetica-Bold", 14)
+        c.drawString(50, height - 250, "Payment Summary")
+        c.line(50, height - 255, 250, height - 255)
+
+        c.setFont("Helvetica", 12)
+        c.drawString(50, height - 280, f"Amount Paid: Rs. {payment_data['amount_paid']}")
+        c.drawString(50, height - 300, f"Payment Mode: {payment_data['payment_mode']}")
+        
+        if payment_data['installment_number']:
+            c.drawString(50, height - 320, f"Installment No: {payment_data['installment_number']}")
+
+        # --- DRAW CURRENT BALANCES ---
+        c.line(50, height - 360, width - 50, height - 360)
+        c.drawString(50, height - 390, f"Total Course Fee: Rs. {student_data['total_fee']}")
+        c.drawString(50, height - 410, f"Total Paid to Date: Rs. {student_data['paid_amount']}")
+        
+        # Calculate remaining
+        remaining = float(student_data['total_fee']) - float(student_data['paid_amount'])
+        if remaining > 0:
+            c.setFillColorRGB(0.8, 0, 0) # Red for pending
+            c.drawString(50, height - 430, f"Remaining Dues: Rs. {remaining}")
+        else:
+            c.setFillColorRGB(0, 0.6, 0) # Green for advance
+            c.drawString(50, height - 430, f"Advance Balance: Rs. {student_data['advance_balance']}")
+
+        # --- FINALIZE PDF ---
+        c.showPage()
+        c.save()
+
+        # 6. Reset buffer pointer to the beginning
+        buffer.seek(0)
+
+        # 7. Stream the PDF to the browser
+        # "inline" tells the browser to view it in a tab. (Use "attachment" to force download)
+        return StreamingResponse(
+            buffer, 
+            media_type="application/pdf", 
+            headers={"Content-Disposition": f"inline; filename={receipt_id}.pdf"}
+        )
 
     except HTTPException as http_ex:
         raise http_ex
