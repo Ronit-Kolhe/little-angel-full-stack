@@ -397,3 +397,57 @@ def generate_receipt_pdf(receipt_id: str, current_user: dict = Depends(get_curre
         raise http_ex
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+    
+@app.get("/api/analytics")
+def get_dashboard_analytics(current_user: dict = Depends(get_current_user)):
+    """
+    Fetch school-wide analytics and the recent payment ledger for the dashboard.
+    Protected route: Requires a valid login token.
+    """
+    try:
+        # 1. Fetch all student financial data
+        student_res = supabase.table("students").select("fee_status, total_fee, paid_amount").execute()
+        students = student_res.data
+
+        # 2. Initialize our mathematical counters
+        total_students = len(students)
+        fees_cleared_count = 0
+        fees_pending_count = 0
+        total_collected = 0.0
+        total_pending = 0.0
+
+        # 3. Crunch the numbers row by row
+        for student in students:
+            total_collected += float(student.get("paid_amount", 0))
+            
+            # Count statuses
+            if student.get("fee_status") == "Cleared":
+                fees_cleared_count += 1
+            else:
+                fees_pending_count += 1
+                
+            # Calculate how much money is still owed
+            remaining = float(student.get("total_fee", 0)) - float(student.get("paid_amount", 0))
+            if remaining > 0:
+                total_pending += remaining
+
+        # 4. Fetch the 10 most recent payments for the Activity Ledger
+        # The 'students(full_name)' syntax tells Supabase to automatically follow the foreign key and grab the name!
+        ledger_res = supabase.table("payments").select(
+            "id, receipt_id, amount_paid, payment_mode, payment_date, students(full_name, grade_level)"
+        ).order("payment_date", desc=True).limit(10).execute()
+
+        # 5. Package everything perfectly for the React frontend
+        return {
+            "summary_cards": {
+                "total_students": total_students,
+                "fees_cleared_count": fees_cleared_count,
+                "fees_pending_count": fees_pending_count,
+                "total_collected": total_collected,
+                "total_pending": total_pending
+            },
+            "recent_activity_ledger": ledger_res.data
+        }
+
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))    
