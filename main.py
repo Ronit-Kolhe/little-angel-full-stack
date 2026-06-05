@@ -8,7 +8,7 @@ import jwt
 from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
 from datetime import date
 from typing import Optional
-
+import datetime
 # Import the security helpers we built earlier
 from security import verify_password, create_access_token
 
@@ -133,6 +133,12 @@ class TeacherCreate(BaseModel):
     full_name: str
     subject: str
     is_active: bool = True  # Defaults to True for new hires
+class PaymentCreate(BaseModel):
+    student_id: int
+    amount_paid: float
+    payment_mode: str  # Cash, Online, Cheque
+    installment_number: Optional[int] = None
+    late_fee_charged: float = 0.00
 # 2. A protected route! Notice the `Depends(get_current_user)` part.
 @app.get("/api/dashboard")
 def get_secure_dashboard(current_user: dict = Depends(get_current_user)):
@@ -229,5 +235,65 @@ def create_teacher(teacher: TeacherCreate, current_user: dict = Depends(get_curr
             "message": "Teacher successfully added!",
             "new_teacher": response.data[0]
         }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/api/payments")
+def create_payment(payment: PaymentCreate, current_user: dict = Depends(get_current_user)):
+    """
+    Process a new fee payment, generate a receipt, and recalculate student balances.
+    Protected route: Requires Admin privileges.
+    """
+    try:
+        # 1. Security Check
+        if current_user.get("role") != "admin":
+            raise HTTPException(status_code=403, detail="Access Denied: Admin privileges required.")
+        
+        # 2. Generate a Unique Receipt ID (e.g., RCPT-20260605143000)
+        receipt_id = datetime.datetime.now().strftime("RCPT-%Y%m%d%H%M%S")
+        
+        # 3. Fetch the student's current financial data
+        student_res = supabase.table("students").select("total_fee, paid_amount").eq("id", payment.student_id).execute()
+        
+        if not student_res.data:
+            raise HTTPException(status_code=404, detail="Student not found in database.")
+            
+        student = student_res.data[0]
+        
+        # 4. The Math Engine: Calculate new balances
+        old_paid = float(student["paid_amount"])
+        total_fee = float(student["total_fee"])
+        
+        new_paid_amount = old_paid + payment.amount_paid
+        
+        # If they paid more than the total fee, store the extra as an advance
+        new_advance_balance = max(0.0, new_paid_amount - total_fee)
+        
+        # Did they clear their dues?
+        new_fee_status = "Cleared" if new_paid_amount >= total_fee else "Pending"
+        
+        # 5. Save the Receipt to the Payments Ledger
+        payment_data = payment.dict(exclude_none=True)
+        payment_data["receipt_id"] = receipt_id
+        
+        new_payment = supabase.table("payments").insert(payment_data).execute()
+        
+        # 6. Update the Student's Master Profile with the new math
+        supabase.table("students").update({
+            "paid_amount": new_paid_amount,
+            "advance_balance": new_advance_balance,
+            "fee_status": new_fee_status
+        }).eq("id", payment.student_id).execute()
+        
+        # 7. Hand the finalized data back to the user
+        return {
+            "message": "Payment successfully processed!",
+            "receipt_id": receipt_id,
+            "new_student_status": new_fee_status,
+            "transaction_details": new_payment.data[0]
+        }
+
+    except HTTPException as http_ex:
+        raise http_ex
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
