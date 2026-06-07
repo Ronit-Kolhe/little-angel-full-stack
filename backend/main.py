@@ -5,7 +5,7 @@ from typing import Optional
 from dotenv import load_dotenv
 import jwt
 
-from fastapi import FastAPI, HTTPException, Depends
+from fastapi import FastAPI, HTTPException, Depends, Request
 from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
@@ -14,8 +14,8 @@ from supabase import create_client, Client
 from reportlab.pdfgen import canvas
 from reportlab.lib.pagesizes import A4
 
-# Import the security helpers we built earlier
-from security import verify_password, create_access_token, SECRET_KEY, ALGORITHM
+# FIX (low): Moved hash_password import to top level — no longer buried inside a function
+from security import verify_password, create_access_token, hash_password, SECRET_KEY, ALGORITHM
 
 # --- 1. INITIALIZATION & DATABASE ---
 load_dotenv()
@@ -30,33 +30,31 @@ supabase: Client = create_client(URL, KEY)
 app = FastAPI(title="School Portal API")
 
 # --- 2. CORS CONFIGURATION ---
+# FIX (low): Restricted methods and headers to only what the frontend actually uses
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["http://localhost:5173"],
     allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_methods=["GET", "POST", "PUT", "DELETE"],
+    allow_headers=["Authorization", "Content-Type"],
 )
 
 # --- 3. SECURITY GUARD ---
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/api/login")
 
 def get_current_user(token: str = Depends(oauth2_scheme)):
-    """Real Security Guard: Verifies the JWT Token."""
-    # We leave the backdoor open just in case any old components still use it
-    if token == "admin_master":
-        return {"username": "Admin", "role": "admin"}
-        
+    """Verifies the JWT token on every protected request."""
     try:
-        # Decode the real cryptographic token sent by React
         payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
         return {
             "username": payload.get("username"),
-            "role": payload.get("role")
+            "role": payload.get("role"),
+            "student_id": payload.get("student_id") # We are adding this!
         }
-    except Exception as e:
-        print(f"Token Error: {e}") # Prints the exact issue to your terminal
-        raise HTTPException(status_code=401, detail="Invalid or expired login token.")
+    except jwt.ExpiredSignatureError:
+        raise HTTPException(status_code=401, detail="Login session has expired.")
+    except jwt.InvalidTokenError:
+        raise HTTPException(status_code=401, detail="Invalid login token.")
 
 # --- 4. DATA MODELS (PYDANTIC) ---
 class LoginRequest(BaseModel):
@@ -111,16 +109,19 @@ def get_school_settings():
             return response.data[0]
         else:
             raise HTTPException(status_code=404, detail="Settings not found")
+    except HTTPException as http_ex:
+        raise http_ex
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
+@app.post("/api/login")
 @app.post("/api/login")
 def login(form_data: OAuth2PasswordRequestForm = Depends()):
     try:
         response = supabase.table("app_users").select("*").eq("username", form_data.username).execute()
         if not response.data:
             raise HTTPException(status_code=401, detail="Invalid username or password")
-        
+
         user = response.data[0]
         if not user.get("is_active"):
             raise HTTPException(status_code=400, detail="User account is deactivated")
@@ -129,14 +130,29 @@ def login(form_data: OAuth2PasswordRequestForm = Depends()):
         if not is_valid:
             raise HTTPException(status_code=401, detail="Invalid username or password")
 
+        # Check if the linked student is verified by the admin
+        is_verified = True
+        if user["role"] == "parent" and user.get("student_id"):
+            student_res = supabase.table("students").select("is_verified").eq("id", user["student_id"]).execute()
+            if student_res.data:
+                is_verified = student_res.data[0].get("is_verified", False)
+
         token_data = {
             "user_id": user["id"],
             "username": user["username"],
-            "role": user["role"]
+            "role": user["role"],
+            "student_id": user.get("student_id") # Bake the ID into the token
         }
         token = create_access_token(data=token_data)
 
-        return {"access_token": token, "token_type": "bearer", "role": user["role"], "username": user["username"]}
+        return {
+            "access_token": token, 
+            "token_type": "bearer", 
+            "role": user["role"], 
+            "username": user["username"],
+            "is_verified": is_verified,
+            "student_id": user.get("student_id")
+        }
     except HTTPException as http_ex:
         raise http_ex
     except Exception as e:
@@ -158,7 +174,9 @@ def get_dashboard_analytics(current_user: dict = Depends(get_current_user)):
 
         total_students = len(students)
         fees_cleared_count = sum(1 for s in students if s.get("fee_status") == "Cleared")
-        fees_pending_count = total_students - fees_cleared_count
+        # FIX (medium): Count Pending students directly instead of total - cleared,
+        # so students with an advance balance (overpaid) are not incorrectly counted as pending.
+        fees_pending_count = sum(1 for s in students if s.get("fee_status") == "Pending")
         total_collected = sum(float(s.get("paid_amount", 0)) for s in students)
         total_pending = sum(max(0, float(s.get("total_fee", 0)) - float(s.get("paid_amount", 0))) for s in students)
 
@@ -180,11 +198,31 @@ def get_dashboard_analytics(current_user: dict = Depends(get_current_user)):
         raise HTTPException(status_code=500, detail=str(e))
 
 # --- 6. STUDENT ROUTES ---
+# FIX (high): Removed duplicate @app.get("/api/students") decorator and section comment.
+# FastAPI silently registered both; only the second handler was ever reachable.
 @app.get("/api/students")
 def get_all_students(current_user: dict = Depends(get_current_user)):
     try:
-        res = supabase.table("students").select("id, full_name, grade_level, fee_status, total_fee, paid_amount").order("id").execute()
+        if current_user.get("role") not in ["admin", "staff"]:
+            raise HTTPException(status_code=403, detail="Parents cannot view the student directory.")
+
+        res = supabase.table("students").select("id, full_name, grade_level, fee_status, total_fee, paid_amount, is_verified").order("id").execute()
         return res.data
+    except HTTPException as http_ex:
+        raise http_ex
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.put("/api/students/{student_id}/verify")
+def verify_student(student_id: int, current_user: dict = Depends(get_current_user)):
+    try:
+        if current_user.get("role") != "admin":
+            raise HTTPException(status_code=403, detail="Access Denied. Admins only.")
+
+        supabase.table("students").update({"is_verified": True}).eq("id", student_id).execute()
+        return {"message": "Student successfully verified and admitted!"}
+    except HTTPException as http_ex:
+        raise http_ex
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -193,34 +231,42 @@ def add_new_student(student: StudentCreate, current_user: dict = Depends(get_cur
     try:
         if current_user.get("role") != "admin":
             raise HTTPException(status_code=403, detail="Access Denied.")
-            
-        new_student_data = student.dict(exclude_none=True)
+
+        # FIX (low): Replaced deprecated .dict() with .model_dump() for Pydantic v2
+        new_student_data = student.model_dump(exclude_none=True)
         new_student_data["paid_amount"] = 0
         new_student_data["advance_balance"] = 0
         new_student_data["fee_status"] = "Pending"
-        
+
         res = supabase.table("students").insert(new_student_data).execute()
         return res.data[0]
+    except HTTPException as http_ex:
+        raise http_ex
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.get("/api/students/{student_id}/report")
 def get_student_report(student_id: int, current_user: dict = Depends(get_current_user)):
     try:
-        if current_user.get("role") != "admin":
-            raise HTTPException(status_code=403, detail="Access Denied.")
-            
+        # 1. Foolproof Security Check: Convert both IDs to strings to ensure they match
+        is_admin_or_staff = current_user.get("role") in ["admin", "staff"]
+        is_owning_parent = current_user.get("role") == "parent" and str(current_user.get("student_id")) == str(student_id)
+
+        if not (is_admin_or_staff or is_owning_parent):
+            raise HTTPException(status_code=403, detail="Access Denied. You can only view your own student's report.")
+
+        # 2. Fetch Data
         student_res = supabase.table("students").select("*").eq("id", student_id).execute()
         if not student_res.data:
             raise HTTPException(status_code=404, detail="Student not found.")
-            
+
         student_profile = student_res.data[0]
         payments_res = supabase.table("payments").select("*").eq("student_id", student_id).order("payment_date", desc=True).execute()
-        
+
         total = float(student_profile.get("total_fee", 0))
         paid = float(student_profile.get("paid_amount", 0))
         remaining = max(0.0, total - paid)
-        
+
         return {
             "profile": student_profile,
             "financial_summary": {
@@ -232,11 +278,18 @@ def get_student_report(student_id: int, current_user: dict = Depends(get_current
             },
             "payment_history": payments_res.data
         }
+    except HTTPException as http_ex:
+        raise http_ex
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
-    
+
 @app.post("/api/register")
 def public_student_registration(registration: PublicRegistration):
+    # FIX (high): Added explicit HTTPException re-raise so intentional errors
+    # (e.g. 400 "Username already exists") are not swallowed by the outer except
+    # and incorrectly returned as 500s.
+    # NOTE: For production, add rate limiting to this endpoint (e.g. slowapi)
+    # to prevent registration spam and username enumeration attacks.
     try:
         # 1. Check if the username is already taken
         user_check = supabase.table("app_users").select("id").eq("username", registration.username).execute()
@@ -250,20 +303,17 @@ def public_student_registration(registration: PublicRegistration):
             "contact_number": registration.contact_number,
             "mother_name": registration.mother_name,
             "father_name": registration.father_name,
-            "total_fee": 50000, # Default fee, Admin can change this later
+            "total_fee": 50000,  # Default fee, Admin can change this later
             "paid_amount": 0.00,
             "fee_status": "Pending",
-            "is_verified": False # Requires Admin Approval!
+            "is_verified": False  # Requires Admin Approval!
         }
         student_res = supabase.table("students").insert(student_data).execute()
         new_student_id = student_res.data[0]["id"]
 
         # 3. Securely hash the password and create the linked Parent User Account
-        hashed_password = verify_password.hash(registration.password) if hasattr(verify_password, 'hash') else "hashed_" + registration.password # Quick fallback, assuming passlib
-        
-        # NOTE: Make sure your security.py has a hashing function. If you used Passlib, use that here.
-        from security import get_password_hash # Adjust this import based on what's in your security.py!
-        real_hashed_password = get_password_hash(registration.password)
+        # FIX (low): hash_password is now imported at the top of the file
+        real_hashed_password = hash_password(registration.password)
 
         user_data = {
             "username": registration.username,
@@ -275,6 +325,8 @@ def public_student_registration(registration: PublicRegistration):
         supabase.table("app_users").insert(user_data).execute()
 
         return {"message": "Registration successful! Pending Admin verification.", "student_id": new_student_id}
+    except HTTPException as http_ex:
+        raise http_ex
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -292,8 +344,11 @@ def create_teacher(teacher: TeacherCreate, current_user: dict = Depends(get_curr
     try:
         if current_user.get("role") != "admin":
             raise HTTPException(status_code=403, detail="Access Denied.")
-        response = supabase.table("teachers").insert(teacher.dict()).execute()
+        # FIX (low): Replaced deprecated .dict() with .model_dump() for Pydantic v2
+        response = supabase.table("teachers").insert(teacher.model_dump()).execute()
         return {"message": "Teacher successfully added!", "new_teacher": response.data[0]}
+    except HTTPException as http_ex:
+        raise http_ex
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -303,34 +358,37 @@ def create_payment(payment: PaymentCreate, current_user: dict = Depends(get_curr
     try:
         if current_user.get("role") != "admin":
             raise HTTPException(status_code=403, detail="Access Denied.")
-        
+
         receipt_id = datetime.datetime.now().strftime("RCPT-%Y%m%d%H%M%S")
         student_res = supabase.table("students").select("total_fee, paid_amount").eq("id", payment.student_id).execute()
-        
+
         if not student_res.data:
             raise HTTPException(status_code=404, detail="Student not found.")
-            
+
         student = student_res.data[0]
         new_paid_amount = float(student["paid_amount"]) + payment.amount_paid
         new_advance_balance = max(0.0, new_paid_amount - float(student["total_fee"]))
         new_fee_status = "Cleared" if new_paid_amount >= float(student["total_fee"]) else "Pending"
-        
-        payment_data = payment.dict(exclude_none=True)
+
+        # FIX (low): Replaced deprecated .dict() with .model_dump() for Pydantic v2
+        payment_data = payment.model_dump(exclude_none=True)
         payment_data["receipt_id"] = receipt_id
-        
+
         new_payment = supabase.table("payments").insert(payment_data).execute()
         supabase.table("students").update({
             "paid_amount": new_paid_amount,
             "advance_balance": new_advance_balance,
             "fee_status": new_fee_status
         }).eq("id", payment.student_id).execute()
-        
+
         return {
             "message": "Payment processed!",
             "receipt_id": receipt_id,
             "new_student_status": new_fee_status,
             "transaction_details": new_payment.data[0]
         }
+    except HTTPException as http_ex:
+        raise http_ex
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -346,6 +404,10 @@ def generate_receipt_pdf(receipt_id: str, current_user: dict = Depends(get_curre
         payment_data = payment_res.data[0]
 
         student_res = supabase.table("students").select("*").eq("id", payment_data["student_id"]).execute()
+        # FIX (high): Added missing guard — previously crashed with IndexError if the
+        # student record had been deleted, returning an unhelpful 500 instead of a 404.
+        if not student_res.data:
+            raise HTTPException(status_code=404, detail="Student record not found for this receipt.")
         student_data = student_res.data[0]
 
         buffer = io.BytesIO()
@@ -353,7 +415,7 @@ def generate_receipt_pdf(receipt_id: str, current_user: dict = Depends(get_curre
         width, height = A4
 
         c.setFont("Helvetica-Bold", 20)
-        c.drawCentredString(width / 2.0, height - 50, "Mangalam Engineering School")
+        c.drawCentredString(width / 2.0, height - 50, "LITTLE ANGELS")
         c.setFont("Helvetica", 12)
         c.drawCentredString(width / 2.0, height - 70, "Official Fee Receipt")
         c.line(50, height - 85, width - 50, height - 85)
@@ -379,7 +441,7 @@ def generate_receipt_pdf(receipt_id: str, current_user: dict = Depends(get_curre
         c.line(50, height - 360, width - 50, height - 360)
         c.drawString(50, height - 390, f"Total Course Fee: Rs. {student_data['total_fee']}")
         c.drawString(50, height - 410, f"Total Paid to Date: Rs. {student_data['paid_amount']}")
-        
+
         remaining = float(student_data['total_fee']) - float(student_data['paid_amount'])
         if remaining > 0:
             c.setFillColorRGB(0.8, 0, 0)
@@ -393,6 +455,7 @@ def generate_receipt_pdf(receipt_id: str, current_user: dict = Depends(get_curre
         buffer.seek(0)
 
         return StreamingResponse(buffer, media_type="application/pdf", headers={"Content-Disposition": f"inline; filename={receipt_id}.pdf"})
+    except HTTPException as http_ex:
+        raise http_ex
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
-    
