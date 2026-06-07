@@ -86,10 +86,16 @@ const ParentRegistrationPage = ({ onNavigateLogin }) => {
   const handleSubmit = async (e) => {
     e.preventDefault();
     // IMPROVEMENT: Basic client-side validation before hitting the API
-    if (formData.password.length < 6) {
-      setStatus({ type: 'error', message: 'Password must be at least 6 characters.' });
-      return;
-    }
+if (formData.password.length < 6) {
+  setStatus({ type: 'error', message: 'Password must be at least 6 characters.' });
+  return;
+}
+
+// ADD this right after it:
+if (formData.password.length > 72) {
+  setStatus({ type: 'error', message: 'Password must be 72 characters or fewer.' });
+  return;
+}
     setLoading(true);
     setStatus(null);
     try {
@@ -163,7 +169,7 @@ const ParentRegistrationPage = ({ onNavigateLogin }) => {
                 <div>
                   <label className="block text-sm font-bold text-gray-700 mb-1">Create Password</label>
                   <div className="relative">
-                    <input required type={showPassword ? 'text' : 'password'} value={formData.password} onChange={handleChange('password')} className={inputClass + ' pr-12'} />
+                    <input required type={showPassword ? 'text' : 'password'} value={formData.password} onChange={handleChange('password')} maxLength={72} className={inputClass + ' pr-12'} />
                     <button type="button" onClick={() => setShowPassword(p => !p)}
                       className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 text-xs font-bold">
                       {showPassword ? 'HIDE' : 'SHOW'}
