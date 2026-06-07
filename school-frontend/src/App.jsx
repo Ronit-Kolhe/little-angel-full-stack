@@ -2,8 +2,113 @@ import React, { useState, useEffect } from 'react';
 import axios from 'axios';
 import { BrowserRouter, Routes, Route, Link, useLocation } from 'react-router-dom';
 
+// --- 0A. PUBLIC PARENT REGISTRATION PAGE ---
+const ParentRegistrationPage = ({ onNavigateLogin }) => {
+  const [formData, setFormData] = useState({
+    full_name: '', grade_level: 'MINI KG', contact_number: '',
+    mother_name: '', father_name: '', username: '', password: ''
+  });
+  const [status, setStatus] = useState(null);
+  const [loading, setLoading] = useState(false);
+
+  const handleSubmit = async (e) => {
+    e.preventDefault();
+    setLoading(true);
+    setStatus(null);
+
+    try {
+      await axios.post('http://127.0.0.1:8000/api/register', formData);
+      setStatus({ type: 'success', message: 'Registration successful! Please wait for Admin approval before logging in.' });
+      // Clear the form on success
+      setFormData({ full_name: '', grade_level: 'MINI KG', contact_number: '', mother_name: '', father_name: '', username: '', password: '' });
+    } catch (err) {
+      setStatus({ type: 'error', message: err.response?.data?.detail || 'Registration failed. Username might be taken.' });
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  return (
+    <div className="min-h-screen bg-slate-900 flex items-center justify-center p-4">
+      <div className="bg-white max-w-2xl w-full rounded-2xl shadow-2xl overflow-hidden">
+        <div className="bg-slate-950 p-6 text-center border-b border-slate-800">
+          <h1 className="text-2xl font-black tracking-widest text-blue-400">
+            LITTLE ANGELS<br/><span className="text-sm text-slate-300 font-medium">ADMISSION PORTAL</span>
+          </h1>
+        </div>
+        
+        <div className="p-8">
+          <div className="flex justify-between items-center mb-6">
+            <h2 className="text-xl font-bold text-gray-800">New Student Registration</h2>
+            <button onClick={onNavigateLogin} className="text-sm font-bold text-blue-600 hover:underline">
+              ← Back to Login
+            </button>
+          </div>
+          
+          {status && (
+            <div className={`p-4 rounded-lg mb-6 font-bold text-center ${status.type === 'success' ? 'bg-green-50 text-green-700' : 'bg-red-50 text-red-700'}`}>
+              {status.message}
+            </div>
+          )}
+
+          <form onSubmit={handleSubmit} className="space-y-4">
+            <div className="grid grid-cols-2 gap-4">
+              <div className="col-span-2 md:col-span-1">
+                <label className="block text-sm font-bold text-gray-700 mb-1">Student Full Name</label>
+                <input required type="text" value={formData.full_name} onChange={e => setFormData({...formData, full_name: e.target.value})} className="w-full bg-slate-50 border border-slate-200 rounded-lg px-4 py-2" />
+              </div>
+              <div>
+                <label className="block text-sm font-bold text-gray-700 mb-1">Applying For Class</label>
+                <select value={formData.grade_level} onChange={e => setFormData({...formData, grade_level: e.target.value})} className="w-full bg-slate-50 border border-slate-200 rounded-lg px-4 py-2">
+                  <option value="MINI KG">MINI KG</option>
+                  <option value="JR KG">JR KG</option>
+                  <option value="SR KG">SR KG</option>
+                </select>
+              </div>
+            </div>
+
+            <div className="grid grid-cols-2 gap-4">
+              <div>
+                <label className="block text-sm font-bold text-gray-700 mb-1">Mother's Name</label>
+                <input type="text" value={formData.mother_name} onChange={e => setFormData({...formData, mother_name: e.target.value})} className="w-full bg-slate-50 border border-slate-200 rounded-lg px-4 py-2" />
+              </div>
+              <div>
+                <label className="block text-sm font-bold text-gray-700 mb-1">Father's Name</label>
+                <input type="text" value={formData.father_name} onChange={e => setFormData({...formData, father_name: e.target.value})} className="w-full bg-slate-50 border border-slate-200 rounded-lg px-4 py-2" />
+              </div>
+            </div>
+
+            <div>
+              <label className="block text-sm font-bold text-gray-700 mb-1">Primary Contact Number</label>
+              <input required type="tel" value={formData.contact_number} onChange={e => setFormData({...formData, contact_number: e.target.value})} className="w-full bg-slate-50 border border-slate-200 rounded-lg px-4 py-2" />
+            </div>
+
+            <div className="pt-4 border-t border-slate-100 mt-4 space-y-4">
+              <h3 className="text-sm font-extrabold text-slate-400 uppercase tracking-wider">Create Portal Login</h3>
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-sm font-bold text-gray-700 mb-1">Choose Username</label>
+                  <input required type="text" value={formData.username} onChange={e => setFormData({...formData, username: e.target.value})} className="w-full bg-slate-50 border border-slate-200 rounded-lg px-4 py-2" />
+                </div>
+                <div>
+                  <label className="block text-sm font-bold text-gray-700 mb-1">Create Password</label>
+                  <input required type="password" value={formData.password} onChange={e => setFormData({...formData, password: e.target.value})} className="w-full bg-slate-50 border border-slate-200 rounded-lg px-4 py-2" />
+                </div>
+              </div>
+            </div>
+            
+            <button type="submit" disabled={loading} className="w-full py-3 mt-4 bg-blue-600 hover:bg-blue-700 text-white font-bold rounded-xl shadow-md transition">
+              {loading ? "Submitting Application..." : "Submit Registration"}
+            </button>
+          </form>
+        </div>
+      </div>
+    </div>
+  );
+};
+
 // --- 0. SECURE LOGIN PAGE ---
-const LoginPage = ({ onLogin }) => {
+const LoginPage = ({ onLogin, onNavigateRegister }) => {
   const [credentials, setCredentials] = useState({ username: '', password: '' });
   const [error, setError] = useState(null);
   const [loading, setLoading] = useState(false);
@@ -82,6 +187,14 @@ const LoginPage = ({ onLogin }) => {
               {loading ? "Authenticating..." : "Access Dashboard"}
             </button>
           </form>
+          <div className="mt-6 text-center pt-4 border-t border-slate-100">
+            <p className="text-sm text-gray-600 font-medium">
+              New parent seeking admission?{' '}
+              <button onClick={onNavigateRegister} className="text-blue-600 hover:text-blue-800 font-bold hover:underline transition">
+                Register Here
+              </button>
+            </p>
+          </div>
         </div>
       </div>
     </div>
@@ -832,22 +945,28 @@ const SettingsPage = () => {
 
 // --- 7. THE MASTER LAYOUT ---
 // --- 7. THE MASTER LAYOUT ---
+// --- 7. THE MASTER LAYOUT ---
 function App() {
-  // Check if a token exists in local storage on load
   const [isAuthenticated, setIsAuthenticated] = useState(!!localStorage.getItem('school_token'));
+  const [authView, setAuthView] = useState('login'); // Toggles between 'login' and 'register'
   
   const handleLogout = () => {
-    localStorage.clear(); // Wipe the security vault
-    setIsAuthenticated(false); // Lock the gates
+    localStorage.clear();
+    setIsAuthenticated(false);
+    setAuthView('login');
   };
 
-  // If they aren't logged in, ONLY show the Login Page
+  // The Gatekeeper: If not logged in, show either Login or Register
   if (!isAuthenticated) {
-    return <LoginPage onLogin={() => setIsAuthenticated(true)} />;
+    if (authView === 'register') {
+      return <ParentRegistrationPage onNavigateLogin={() => setAuthView('login')} />;
+    }
+    return <LoginPage onLogin={() => setIsAuthenticated(true)} onNavigateRegister={() => setAuthView('register')} />;
   }
 
-  // Get the logged-in user's name for the header
   const activeUser = localStorage.getItem('username') || "Staff";
+  
+  // ... rest of your App return statement stays exactly the same ...
 
   return (
     <BrowserRouter>

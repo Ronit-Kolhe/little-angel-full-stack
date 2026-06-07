@@ -89,6 +89,15 @@ class PaymentCreate(BaseModel):
     installment_number: Optional[int] = None
     late_fee_charged: float = 0.00
 
+class PublicRegistration(BaseModel):
+    full_name: str
+    grade_level: str
+    contact_number: str
+    mother_name: Optional[str] = None
+    father_name: Optional[str] = None
+    username: str  # The username the parent/student will use to log in
+    password: str  # The unhashed password they want to use
+
 # --- 5. SYSTEM ROUTES ---
 @app.get("/")
 def read_root():
@@ -223,6 +232,49 @@ def get_student_report(student_id: int, current_user: dict = Depends(get_current
             },
             "payment_history": payments_res.data
         }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+    
+@app.post("/api/register")
+def public_student_registration(registration: PublicRegistration):
+    try:
+        # 1. Check if the username is already taken
+        user_check = supabase.table("app_users").select("id").eq("username", registration.username).execute()
+        if user_check.data:
+            raise HTTPException(status_code=400, detail="Username already exists. Please choose another.")
+
+        # 2. Insert the unverified student profile
+        student_data = {
+            "full_name": registration.full_name,
+            "grade_level": registration.grade_level,
+            "contact_number": registration.contact_number,
+            "mother_name": registration.mother_name,
+            "father_name": registration.father_name,
+            "total_fee": 50000, # Default fee, Admin can change this later
+            "paid_amount": 0.00,
+            "fee_status": "Pending",
+            "is_verified": False # Requires Admin Approval!
+        }
+        student_res = supabase.table("students").insert(student_data).execute()
+        new_student_id = student_res.data[0]["id"]
+
+        # 3. Securely hash the password and create the linked Parent User Account
+        hashed_password = verify_password.hash(registration.password) if hasattr(verify_password, 'hash') else "hashed_" + registration.password # Quick fallback, assuming passlib
+        
+        # NOTE: Make sure your security.py has a hashing function. If you used Passlib, use that here.
+        from security import get_password_hash # Adjust this import based on what's in your security.py!
+        real_hashed_password = get_password_hash(registration.password)
+
+        user_data = {
+            "username": registration.username,
+            "password_hash": real_hashed_password,
+            "role": "parent",
+            "is_active": True,
+            "student_id": new_student_id
+        }
+        supabase.table("app_users").insert(user_data).execute()
+
+        return {"message": "Registration successful! Pending Admin verification.", "student_id": new_student_id}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
