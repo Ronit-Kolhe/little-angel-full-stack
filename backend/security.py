@@ -18,12 +18,13 @@ ACCESS_TOKEN_EXPIRE_MINUTES = 60  # Logins last for 1 hour
 
 def hash_password(password: str) -> str:
     """Takes a plain text password and returns a secure, unreadable hash."""
-    return pwd_context.hash(password.encode("utf-8")[:72].decode("utf-8"))
+    # Force truncation to 72 bytes to prevent bcrypt crashes
+    return pwd_context.hash(password[:72])
 
 def verify_password(plain_password: str, hashed_password: str) -> bool:
     """Compares a typed password with the scrambled hash in the database."""
-    truncated = plain_password.encode("utf-8")[:72].decode("utf-8")
-    return pwd_context.verify(truncated, hashed_password)
+    # Force truncation to 72 bytes to prevent bcrypt crashes
+    return pwd_context.verify(plain_password[:72], hashed_password)
 
 def create_access_token(data: dict, expires_delta: Optional[timedelta] = None) -> str:
     """Generates a secure digital badge (JWT token) containing the user's role and ID."""
