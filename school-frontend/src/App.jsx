@@ -5,7 +5,7 @@ import { BrowserRouter, Routes, Route, Link, useLocation, useNavigate } from 're
 // --- GLOBAL AXIOS CONFIG ---
 // FIX (bug): Centralise the base URL so it's not hardcoded on every single request.
 // Change this one constant to point at your production server.
-const API_BASE = 'http://127.0.0.1:8000';
+const API_BASE = 'https://little-angel.onrender.com';
 
 // FIX (bug): Centralise the auth header so it's never forgotten on a request.
 const authHeader = () => ({
