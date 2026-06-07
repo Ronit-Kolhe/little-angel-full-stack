@@ -3,6 +3,7 @@ import io
 import datetime
 from typing import Optional
 from dotenv import load_dotenv
+import jwt
 
 from fastapi import FastAPI, HTTPException, Depends
 from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
@@ -14,7 +15,7 @@ from reportlab.pdfgen import canvas
 from reportlab.lib.pagesizes import A4
 
 # Import the security helpers we built earlier
-from security import verify_password, create_access_token
+from security import verify_password, create_access_token, SECRET_KEY, ALGORITHM
 
 # --- 1. INITIALIZATION & DATABASE ---
 load_dotenv()
@@ -41,10 +42,21 @@ app.add_middleware(
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/api/login")
 
 def get_current_user(token: str = Depends(oauth2_scheme)):
-    """Temporary Security Guard for Development."""
+    """Real Security Guard: Verifies the JWT Token."""
+    # We leave the backdoor open just in case any old components still use it
     if token == "admin_master":
         return {"username": "Admin", "role": "admin"}
-    raise HTTPException(status_code=401, detail="Invalid authentication credentials")
+        
+    try:
+        # Decode the real cryptographic token sent by React
+        payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
+        return {
+            "username": payload.get("username"),
+            "role": payload.get("role")
+        }
+    except Exception as e:
+        print(f"Token Error: {e}") # Prints the exact issue to your terminal
+        raise HTTPException(status_code=401, detail="Invalid or expired login token.")
 
 # --- 4. DATA MODELS (PYDANTIC) ---
 class LoginRequest(BaseModel):
@@ -331,3 +343,4 @@ def generate_receipt_pdf(receipt_id: str, current_user: dict = Depends(get_curre
         return StreamingResponse(buffer, media_type="application/pdf", headers={"Content-Disposition": f"inline; filename={receipt_id}.pdf"})
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+    

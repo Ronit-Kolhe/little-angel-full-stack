@@ -2,6 +2,92 @@ import React, { useState, useEffect } from 'react';
 import axios from 'axios';
 import { BrowserRouter, Routes, Route, Link, useLocation } from 'react-router-dom';
 
+// --- 0. SECURE LOGIN PAGE ---
+const LoginPage = ({ onLogin }) => {
+  const [credentials, setCredentials] = useState({ username: '', password: '' });
+  const [error, setError] = useState(null);
+  const [loading, setLoading] = useState(false);
+
+  const handleSubmit = async (e) => {
+    e.preventDefault();
+    setLoading(true);
+    setError(null);
+
+    try {
+      // FastAPI expects standard Form Data for logins, not a JSON object!
+      const params = new URLSearchParams();
+      params.append('username', credentials.username);
+      params.append('password', credentials.password);
+
+      const response = await axios.post('http://127.0.0.1:8000/api/login', params, {
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' }
+      });
+
+      // Save the secure token and user details to the browser's local vault
+      localStorage.setItem('school_token', response.data.access_token);
+      localStorage.setItem('username', response.data.username);
+      localStorage.setItem('role', response.data.role);
+      
+      onLogin(); // Tell the main app to unlock the gates
+    } catch (err) {
+      setError(err.response?.data?.detail || "Invalid username or password");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  return (
+    <div className="min-h-screen bg-slate-900 flex items-center justify-center p-4">
+      <div className="bg-white max-w-md w-full rounded-2xl shadow-2xl overflow-hidden">
+        <div className="bg-slate-950 p-8 text-center border-b border-slate-800">
+          <h1 className="text-2xl font-black tracking-widest text-blue-400">
+            LITTLE ANGELS<br/><span className="text-sm text-slate-300 font-medium">EDU PORTAL</span>
+          </h1>
+        </div>
+        
+        <div className="p-8">
+          <h2 className="text-xl font-bold text-gray-800 mb-6 text-center">Secure Staff Login</h2>
+          
+          <form onSubmit={handleSubmit} className="space-y-5">
+            {error && (
+              <div className="p-3 bg-red-50 border border-red-200 text-red-600 text-sm font-bold rounded-lg text-center">
+                {error}
+              </div>
+            )}
+            
+            <div>
+              <label className="block text-sm font-bold text-gray-700 mb-1">Username</label>
+              <input 
+                type="text" required
+                value={credentials.username}
+                onChange={(e) => setCredentials({...credentials, username: e.target.value})}
+                className="w-full bg-slate-50 border border-slate-200 rounded-lg px-4 py-3 focus:ring-2 focus:ring-blue-500 outline-none transition"
+              />
+            </div>
+            
+            <div>
+              <label className="block text-sm font-bold text-gray-700 mb-1">Password</label>
+              <input 
+                type="password" required
+                value={credentials.password}
+                onChange={(e) => setCredentials({...credentials, password: e.target.value})}
+                className="w-full bg-slate-50 border border-slate-200 rounded-lg px-4 py-3 focus:ring-2 focus:ring-blue-500 outline-none transition"
+              />
+            </div>
+            
+            <button 
+              type="submit" disabled={loading}
+              className="w-full py-3 bg-blue-600 hover:bg-blue-700 text-white font-bold rounded-xl shadow-md transition"
+            >
+              {loading ? "Authenticating..." : "Access Dashboard"}
+            </button>
+          </form>
+        </div>
+      </div>
+    </div>
+  );
+};
+
 // --- 1. SIDEBAR LINK COMPONENT ---
 const SidebarLink = ({ to, label }) => {
   const location = useLocation();
@@ -29,7 +115,7 @@ const DashboardHome = () => {
     try {
       setLoading(true);
       const response = await axios.get('http://127.0.0.1:8000/api/analytics', {
-        headers: { Authorization: "Bearer admin_master" } 
+        headers: { Authorization: `Bearer ${localStorage.getItem('school_token')}` } 
       });
       setAnalytics(response.data);
       setError(null);
@@ -115,7 +201,7 @@ const StudentProfileModal = ({ studentId, onClose }) => {
     const fetchReport = async () => {
       try {
         const response = await axios.get(`http://127.0.0.1:8000/api/students/${studentId}/report`, {
-          headers: { Authorization: "Bearer admin_master" }
+          headers: { Authorization: `Bearer ${localStorage.getItem('school_token')}` }
         });
         setReport(response.data);
       } catch (err) {
@@ -229,7 +315,7 @@ const AddStudentModal = ({ onClose, onStudentAdded }) => {
     setLoading(true);
     try {
       await axios.post('http://127.0.0.1:8000/api/students', formData, {
-        headers: { Authorization: "Bearer admin_master" }
+        headers: { Authorization: `Bearer ${localStorage.getItem('school_token')}` }
       });
       onStudentAdded(); 
       onClose(); 
@@ -350,7 +436,7 @@ const StudentsPage = () => {
   const fetchStudents = async () => {
     try {
       const response = await axios.get('http://127.0.0.1:8000/api/students', {
-        headers: { Authorization: "Bearer admin_master" } 
+        headers: { Authorization: `Bearer ${localStorage.getItem('school_token')}` } 
       });
       setStudents(response.data);
     } catch (err) {
@@ -454,7 +540,7 @@ const PaymentsPage = () => {
     const fetchStudents = async () => {
       try {
         const response = await axios.get('http://127.0.0.1:8000/api/students', {
-          headers: { Authorization: "Bearer admin_master" } 
+          headers: { Authorization: `Bearer ${localStorage.getItem('school_token')}` } 
         });
         setStudents(response.data);
       } catch (err) {
@@ -471,7 +557,7 @@ const PaymentsPage = () => {
 
     try {
       const response = await axios.post('http://127.0.0.1:8000/api/payments', formData, {
-        headers: { Authorization: "Bearer admin_master" }
+        headers: { Authorization: `Bearer ${localStorage.getItem('school_token')}` }
       });
       
       setStatus({ 
@@ -491,7 +577,7 @@ const PaymentsPage = () => {
   const printReceipt = async (receiptId) => {
     try {
       const response = await axios.get(`http://127.0.0.1:8000/api/receipts/${receiptId}`, {
-        headers: { Authorization: "Bearer admin_master" },
+        headers: { Authorization: `Bearer ${localStorage.getItem('school_token')}` },
         responseType: 'blob' 
       });
       
@@ -589,8 +675,180 @@ const PaymentsPage = () => {
   );
 };
 
+// --- 8. REPORTS PAGE (FEE DEFAULTERS) ---
+const ReportsPage = () => {
+  const [defaulters, setDefaulters] = useState([]);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    const fetchReports = async () => {
+      try {
+        // We reuse the students endpoint to generate our financial report
+        const response = await axios.get('http://127.0.0.1:8000/api/students', {
+          headers: { Authorization: `Bearer ${localStorage.getItem('school_token')}` }
+        });
+        
+        // Filter out only the students who still owe money
+        const pendingStudents = response.data.filter(s => s.fee_status === 'Pending');
+        setDefaulters(pendingStudents);
+      } catch (err) {
+        console.error("Failed to load report data.");
+      } finally {
+        setLoading(false);
+      }
+    };
+    fetchReports();
+  }, []);
+
+  const totalPendingMoney = defaulters.reduce((sum, student) => sum + (student.total_fee - student.paid_amount), 0);
+
+  if (loading) return <div className="p-8 text-blue-500 font-bold">Generating Report...</div>;
+
+  return (
+    <div className="p-8">
+      <div className="flex justify-between items-center mb-6">
+        <div>
+          <h2 className="text-2xl font-bold text-gray-800">Financial Reports</h2>
+          <p className="text-gray-500 mt-1">Outstanding dues and fee defaulters.</p>
+        </div>
+        <button 
+          onClick={() => window.print()}
+          className="px-4 py-2 bg-slate-800 text-white rounded-lg hover:bg-slate-900 transition text-sm font-bold shadow-md"
+        >
+          Print Report
+        </button>
+      </div>
+
+      <div className="bg-red-50 border border-red-100 p-6 rounded-xl mb-8 flex justify-between items-center">
+        <div>
+          <p className="text-sm text-red-600 font-bold uppercase tracking-wider">Total Outstanding Revenue</p>
+          <p className="text-3xl font-black text-red-700 mt-1">₹{totalPendingMoney.toLocaleString()}</p>
+        </div>
+        <div className="text-right">
+          <p className="text-sm text-red-600 font-bold uppercase tracking-wider">Total Defaulters</p>
+          <p className="text-3xl font-black text-red-700 mt-1">{defaulters.length} Students</p>
+        </div>
+      </div>
+
+      <div className="bg-white rounded-xl shadow-sm border border-gray-100 overflow-hidden">
+        <table className="w-full text-left text-sm text-gray-600">
+          <thead className="bg-slate-50 text-slate-500 border-b border-gray-100">
+            <tr>
+              <th className="px-6 py-4 font-bold">ID</th>
+              <th className="px-6 py-4 font-bold">Student Name</th>
+              <th className="px-6 py-4 font-bold">Class</th>
+              <th className="px-6 py-4 font-bold text-right">Amount Owed</th>
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-gray-100">
+            {defaulters.map((student) => (
+              <tr key={student.id} className="hover:bg-slate-50 transition">
+                <td className="px-6 py-4 font-medium text-slate-400">#{student.id}</td>
+                <td className="px-6 py-4 font-bold text-gray-800">{student.full_name}</td>
+                <td className="px-6 py-4">{student.grade_level}</td>
+                <td className="px-6 py-4 font-bold text-red-600 text-right">
+                  ₹{(student.total_fee - student.paid_amount).toLocaleString()}
+                </td>
+              </tr>
+            ))}
+            {defaulters.length === 0 && (
+              <tr>
+                <td colSpan="4" className="px-6 py-8 text-center text-green-600 font-bold">
+                  All clear! No pending dues in the system.
+                </td>
+              </tr>
+            )}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+};
+
+// --- 9. SETTINGS PAGE ---
+const SettingsPage = () => {
+  const [saved, setSaved] = useState(false);
+
+  const handleSave = (e) => {
+    e.preventDefault();
+    setSaved(true);
+    setTimeout(() => setSaved(false), 3000);
+  };
+
+  return (
+    <div className="p-8 max-w-3xl mx-auto">
+      <div className="mb-8">
+        <h2 className="text-2xl font-bold text-gray-800">System Settings</h2>
+        <p className="text-gray-500 mt-1">Configure your portal preferences.</p>
+      </div>
+
+      <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-8">
+        {saved && (
+          <div className="p-4 bg-green-50 text-green-700 font-bold rounded-xl mb-6 border border-green-200">
+            Settings successfully updated!
+          </div>
+        )}
+
+        <form onSubmit={handleSave} className="space-y-6">
+          <div className="grid grid-cols-2 gap-6">
+            <div className="col-span-2">
+              <label className="block text-sm font-bold text-gray-700 mb-2">School/Organization Name</label>
+              <input 
+                type="text" defaultValue="Mangalam Engineering School"
+                className="w-full bg-slate-50 border border-slate-200 text-gray-800 rounded-lg px-4 py-3 focus:ring-2 focus:ring-blue-500 outline-none"
+              />
+            </div>
+            
+            <div>
+              <label className="block text-sm font-bold text-gray-700 mb-2">Academic Year</label>
+              <select className="w-full bg-slate-50 border border-slate-200 text-gray-800 rounded-lg px-4 py-3 focus:ring-2 focus:ring-blue-500 outline-none">
+                <option>2025 - 2026</option>
+                <option>2026 - 2027</option>
+              </select>
+            </div>
+
+            <div>
+              <label className="block text-sm font-bold text-gray-700 mb-2">Currency</label>
+              <select className="w-full bg-slate-50 border border-slate-200 text-gray-800 rounded-lg px-4 py-3 focus:ring-2 focus:ring-blue-500 outline-none">
+                <option>INR (₹)</option>
+                <option>USD ($)</option>
+              </select>
+            </div>
+          </div>
+
+          <div className="pt-6 border-t border-gray-100 flex justify-end">
+            <button 
+              type="submit"
+              className="px-6 py-3 bg-blue-600 hover:bg-blue-700 text-white font-bold rounded-xl shadow-md transition"
+            >
+              Save Configuration
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
+  );
+};
+
+// --- 7. THE MASTER LAYOUT ---
 // --- 7. THE MASTER LAYOUT ---
 function App() {
+  // Check if a token exists in local storage on load
+  const [isAuthenticated, setIsAuthenticated] = useState(!!localStorage.getItem('school_token'));
+  
+  const handleLogout = () => {
+    localStorage.clear(); // Wipe the security vault
+    setIsAuthenticated(false); // Lock the gates
+  };
+
+  // If they aren't logged in, ONLY show the Login Page
+  if (!isAuthenticated) {
+    return <LoginPage onLogin={() => setIsAuthenticated(true)} />;
+  }
+
+  // Get the logged-in user's name for the header
+  const activeUser = localStorage.getItem('username') || "Staff";
+
   return (
     <BrowserRouter>
       <div className="flex h-screen bg-slate-50 font-sans">
@@ -612,7 +870,11 @@ function App() {
           </nav>
           
           <div className="p-4 border-t border-slate-800">
-            <button className="w-full text-left px-4 py-2 text-slate-400 hover:text-red-400 transition-colors">
+            {/* The Logout Button is now active! */}
+            <button 
+              onClick={handleLogout}
+              className="w-full text-left px-4 py-2 text-slate-400 hover:text-red-400 transition-colors font-bold"
+            >
               Log Out
             </button>
           </div>
@@ -624,10 +886,10 @@ function App() {
           <header className="bg-white h-16 flex items-center justify-between px-8 border-b border-slate-200 shadow-sm z-10">
             <h2 className="text-lg font-semibold text-slate-700">Administrator View</h2>
             <div className="flex items-center gap-3">
-              <div className="w-8 h-8 rounded-full bg-blue-100 flex items-center justify-center text-blue-700 font-bold">
-                A
+              <div className="w-8 h-8 rounded-full bg-blue-100 flex items-center justify-center text-blue-700 font-bold uppercase">
+                {activeUser.charAt(0)}
               </div>
-              <span className="text-sm font-medium text-slate-600">Admin Master</span>
+              <span className="text-sm font-bold text-slate-600 capitalize">{activeUser}</span>
             </div>
           </header>
 
@@ -635,10 +897,9 @@ function App() {
             <Routes>
               <Route path="/" element={<DashboardHome />} />
               <Route path="/students" element={<StudentsPage />} />
-              {/* Notice how the real PaymentsPage is mapped here! */}
               <Route path="/payments" element={<PaymentsPage />} />
-              <Route path="/reports" element={<div className="p-8 text-slate-500">Reports Module Loading...</div>} />
-              <Route path="/settings" element={<div className="p-8 text-slate-500">System Settings Loading...</div>} />
+              <Route path="/reports" element={<ReportsPage />} />
+              <Route path="/settings" element={<SettingsPage />} />
             </Routes>
           </main>
           
@@ -647,5 +908,7 @@ function App() {
     </BrowserRouter>
   );
 }
+
+
 
 export default App;
