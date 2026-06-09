@@ -123,7 +123,10 @@ def _safe_filename(value: str) -> str:
 # ---------------------------------------------------------------------------
 @app.get("/")
 def read_root():
-    return {"message": "Welcome to the School Portal API!"}
+    return {
+        "message": "Welcome to the School Portal API!",
+        "auth": "bcrypt-direct",
+    }
 
 
 @app.get("/api/settings")
