@@ -17,7 +17,8 @@ const authHeader = () => ({
 axios.interceptors.response.use(
   res => res,
   err => {
-    if (err.response?.status === 401) {
+    const isLoginRequest = err.config?.url?.includes('/api/login');
+    if (err.response?.status === 401 && !isLoginRequest) {
       localStorage.clear();
       // Reload to reset React state cleanly
       window.location.href = '/';
@@ -252,7 +253,7 @@ const LoginPage = ({ onLogin, onNavigateRegister }) => {
               <div className="relative">
                 <input type={showPassword ? 'text' : 'password'} required value={credentials.password}
                   onChange={(e) => setCredentials({ ...credentials, password: e.target.value })}
-                  className={inputClass + ' pr-12'} autoComplete="current-password" />
+                  maxLength={72} className={inputClass + ' pr-12'} autoComplete="current-password" />
                 <button type="button" onClick={() => setShowPassword(p => !p)}
                   className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 text-xs font-bold">
                   {showPassword ? 'HIDE' : 'SHOW'}
@@ -613,6 +614,7 @@ const AddStudentModal = ({ onClose, onStudentAdded }) => {
 
 // --- 5. STUDENTS PAGE ---
 const StudentsPage = () => {
+  const toast = useToast();
   const [students, setStudents] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
