@@ -35,10 +35,14 @@ app = FastAPI(title="School Portal API")
 # ---------------------------------------------------------------------------
 # 2.  CORS
 # ---------------------------------------------------------------------------
+# ---------------------------------------------------------------------------
+# 2.  CORS
+# ---------------------------------------------------------------------------
 app.add_middleware(
         CORSMiddleware,
-        allow_origins=["*"],  # Lock this down to your Vercel URL in production
-        allow_credentials=False,
+        # Replace the URL below with your EXACT Vercel URL
+        allow_origins=["https://little-angels-six.vercel.app/", "http://localhost:5173"], 
+        allow_credentials=True,
         allow_methods=["*"],
         allow_headers=["*"],
     )
