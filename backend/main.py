@@ -37,8 +37,8 @@ app = FastAPI(title="School Portal API")
 # ---------------------------------------------------------------------------
 app.add_middleware(
         CORSMiddleware,
-        allow_origins=["*"], # We will lock this down to your Vercel URL later
-        allow_credentials=True,
+        allow_origins=["*"],  # Lock this down to your Vercel URL in production
+        allow_credentials=False,
         allow_methods=["*"],
         allow_headers=["*"],
     )
@@ -199,8 +199,8 @@ def login(form_data: OAuth2PasswordRequestForm = Depends()):
         }
     except HTTPException:
         raise
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+    except Exception:
+        raise HTTPException(status_code=500, detail="Login failed. Please try again later.")
 
 
 @app.get("/api/dashboard")
